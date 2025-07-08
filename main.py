@@ -94,7 +94,7 @@ def main():
             logger.info(f"All {total_symbols} symbols are valid!")
             
             # Save final output with version info
-            output_dir = data_dir / "output" / "cpc_schema"
+            output_dir = data_dir / "output"
             output_dir.mkdir(parents=True, exist_ok=True)
             
             # Create output with version date

@@ -18,7 +18,7 @@ class CPCTitleParser:
             'subgroup': None      # e.g., A01B1/00
         }
         
-        if not symbol:
+        if not symbol or symbol.isdigit():
             return components
 
         # Extract section (A-H, Y)
@@ -56,7 +56,7 @@ class CPCTitleParser:
             if not symbol_match:
                 return None
             symbol, title = symbol_match.groups()
-            level = None
+            level = None  # No level for section/class/subclass entries
 
         # Parse the symbol into components
         components = self.parse_symbol(symbol)

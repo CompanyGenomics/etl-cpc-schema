@@ -4,109 +4,194 @@ Tests for CPC parser module
 
 import pytest
 from pathlib import Path
-from unittest.mock import Mock, patch, mock_open
 import zipfile
-import xml.etree.ElementTree as ET
+import polars as pl
 
-from cpc_etl.parser import CPCParser
+from src.cpc_etl.parser import CPCTitleParser
 
 
 @pytest.fixture
-def parser():
-    """Fixture for CPCParser instance"""
-    return CPCParser()
+def parser(tmp_path):
+    """Fixture for CPCTitleParser instance using temporary directory"""
+    return CPCTitleParser(output_dir=str(tmp_path))
 
 
-def test_parse_title_list_xml(parser):
-    """Test parsing title list from XML format"""
-    xml_content = """<?xml version="1.0" encoding="UTF-8"?><root><item symbol="A01B1/00" title="Hand tools"/><item symbol="A01B3/00" title="Ploughs with fixed plough-shares"/></root>"""
+def test_init(parser, tmp_path):
+    """Test parser initialization"""
+    assert parser.output_dir == tmp_path
+    assert parser.output_dir.exists()
+
+
+def test_parse_symbol():
+    """Test parsing CPC symbols into components"""
+    parser = CPCTitleParser()
     
-    with patch('zipfile.ZipFile') as mock_zip:
-        # Mock the file list
-        mock_zip.return_value.__enter__.return_value.namelist.return_value = ['file.xml']
-        
-        # Mock the file content
-        mock_file = Mock()
-        mock_file.read.return_value = xml_content.encode('utf-8')
-        mock_file.__enter__ = Mock(return_value=mock_file)
-        mock_file.__exit__ = Mock()
-        mock_zip.return_value.__enter__.return_value.open.return_value = mock_file
-        
-        result = parser.parse_title_list(Path("dummy.zip"))
-        
-        assert result == {
-            'A01B1/00': 'Hand tools',
-            'A01B3/00': 'Ploughs with fixed plough-shares'
-        }
-
-
-def test_parse_title_list_text(parser):
-    """Test parsing title list from text format"""
-    text_content = """
-A01B1/00    0    Hand tools (edge trimmers for lawns A01G3/06)
-A01B1/02    1    Spades; Shovels
-A01B3/00    0    Ploughs with fixed plough-shares
-"""
+    # Test various symbol formats
+    assert parser.parse_symbol("A") == {
+        'section': 'A',
+        'subsection': None,
+        'group': None,
+        'subgroup': None
+    }
     
-    with patch('zipfile.ZipFile') as mock_zip:
-        # Mock the file list
-        mock_zip.return_value.__enter__.return_value.namelist.return_value = ['file.xml']
-        
-        # Mock the file content and make XML parsing fail
-        mock_file = Mock()
-        mock_file.read.return_value = text_content.encode('utf-8')
-        mock_file.__enter__ = Mock(return_value=mock_file)
-        mock_file.__exit__ = Mock()
-        mock_zip.return_value.__enter__.return_value.open.return_value = mock_file
-        
-        result = parser.parse_title_list(Path("dummy.zip"))
-        
-        assert result == {
-            'A01B1/00': 'Hand tools',
-            'A01B3/00': 'Ploughs with fixed plough-shares'
-        }
-
-
-def test_parse_definitions(parser):
-    """Test parsing definitions from XML format"""
-    xml_content = """<?xml version="1.0" encoding="UTF-8"?><root><class-definition symbol="A01B1/00"><definition>Hand tools for working the soil</definition></class-definition><class-definition symbol="A01B3/00"><text>Ploughs with fixed shares for general purposes</text></class-definition></root>"""
+    assert parser.parse_symbol("A01") == {
+        'section': 'A',
+        'subsection': 'A01',
+        'group': None,
+        'subgroup': None
+    }
     
-    with patch('zipfile.ZipFile') as mock_zip:
-        # Mock the file list
-        mock_zip.return_value.__enter__.return_value.namelist.return_value = ['file.xml']
-        
-        # Mock the file content
-        mock_file = Mock()
-        mock_file.read.return_value = xml_content.encode('utf-8')
-        mock_file.__enter__ = Mock(return_value=mock_file)
-        mock_file.__exit__ = Mock()
-        mock_zip.return_value.__enter__.return_value.open.return_value = mock_file
-        
-        result = parser.parse_definitions(Path("dummy.zip"))
-        
-        assert result == {
-            'A01B1/00': 'Hand tools for working the soil',
-            'A01B3/00': 'Ploughs with fixed shares for general purposes'
-        }
-
-
-def test_parse_definitions_with_nested_content(parser):
-    """Test parsing definitions with nested XML content"""
-    xml_content = """<?xml version="1.0" encoding="UTF-8"?><root><class-definition symbol="A01B1/00"><definition><p>Hand tools</p><note>Including spades and shovels</note></definition></class-definition></root>"""
+    assert parser.parse_symbol("A01B") == {
+        'section': 'A',
+        'subsection': 'A01',
+        'group': 'A01B',
+        'subgroup': None
+    }
     
-    with patch('zipfile.ZipFile') as mock_zip:
-        # Mock the file list
-        mock_zip.return_value.__enter__.return_value.namelist.return_value = ['file.xml']
-        
-        # Mock the file content
-        mock_file = Mock()
-        mock_file.read.return_value = xml_content.encode('utf-8')
-        mock_file.__enter__ = Mock(return_value=mock_file)
-        mock_file.__exit__ = Mock()
-        mock_zip.return_value.__enter__.return_value.open.return_value = mock_file
-        
-        result = parser.parse_definitions(Path("dummy.zip"))
-        
-        assert result == {
-            'A01B1/00': 'Hand tools Including spades and shovels'
-        }
+    assert parser.parse_symbol("A01B1/00") == {
+        'section': 'A',
+        'subsection': 'A01',
+        'group': 'A01B',
+        'subgroup': 'A01B1/00'
+    }
+
+
+def test_parse_line():
+    """Test parsing individual lines from CPC title file"""
+    parser = CPCTitleParser()
+    
+    # Test section line
+    section_line = "A01B1/00 0 Hand tools"
+    result = parser.parse_line(section_line)
+    assert result == {
+        'symbol': 'A01B1/00',
+        'level': 0,
+        'title': 'Hand tools',
+        'section': 'A',
+        'class': 'A01',
+        'subclass': 'A01B'
+    }
+    
+    # Test empty line
+    assert parser.parse_line("") is None
+    
+    # Test invalid line
+    assert parser.parse_line("Invalid Line") is None
+
+
+def test_process_zip_file(parser):
+    """Test processing CPC title list zip file using real data"""
+    # Use the actual test data file
+    test_zip_path = "tests/data/raw/test_cpc_titles.zip"
+    
+    # Process the actual zip file
+    df = parser.process_zip_file(test_zip_path)
+    
+    # Verify DataFrame structure and content
+    assert isinstance(df, pl.DataFrame)
+    assert len(df) > 0
+    assert all(col in df.columns for col in ['symbol', 'level', 'title', 'section', 'class', 'subclass'])
+    
+    # Verify column types
+    schema = df.schema
+    assert str(schema['symbol']) == 'String'
+    assert str(schema['level']) == 'Float64'
+    assert str(schema['title']) == 'String'
+    assert str(schema['section']) == 'String'
+    assert str(schema['class']) == 'String'
+    assert str(schema['subclass']) == 'String'
+    
+    # Verify actual data content
+    # Find a row with a level value for type checking
+    row_with_level = None
+    for i in range(len(df)):
+        row = df.row(i)
+        if row[1] is not None:  # Check if level is not None
+            row_with_level = row
+            break
+    
+    assert row_with_level is not None  # Ensure we found a row with level
+    assert len(row_with_level) == 6  # Should have all 6 columns
+    assert isinstance(row_with_level[0], str)  # symbol should be string
+    assert isinstance(row_with_level[1], float)  # level should be float
+    assert isinstance(row_with_level[2], str)  # title should be string
+
+
+def test_parse_and_save(parser, tmp_path):
+    """Test parsing and saving CPC titles using real data"""
+    # Use the actual test data file
+    test_zip_path = "tests/data/raw/test_cpc_titles.zip"
+    
+    # Process and save the data
+    output_path = parser.parse_and_save(test_zip_path)
+    
+    # Verify output
+    assert isinstance(output_path, Path)
+    assert output_path.exists()
+    assert str(output_path).endswith('cpc_titles.parquet')
+    
+    # Verify the saved data can be read back
+    df = pl.read_parquet(output_path)
+    assert len(df) > 0
+    assert all(col in df.columns for col in ['symbol', 'level', 'title', 'section', 'class', 'subclass'])
+
+
+def test_parse_line_with_parentheses():
+    """Test parsing lines with parenthetical content"""
+    parser = CPCTitleParser()
+    
+    line = "A01B1/00 0 Hand tools (edge trimmers for lawns A01G3/06)"
+    result = parser.parse_line(line)
+    assert result == {
+        'symbol': 'A01B1/00',
+        'level': 0,
+        'title': 'Hand tools (edge trimmers for lawns A01G3/06)',
+        'section': 'A',
+        'class': 'A01',
+        'subclass': 'A01B'
+    }
+
+
+def test_parse_line_with_semicolons():
+    """Test parsing lines with semicolon-separated content"""
+    parser = CPCTitleParser()
+    
+    line = "A01B1/02 1 Spades; Shovels; Hoes"
+    result = parser.parse_line(line)
+    assert result == {
+        'symbol': 'A01B1/02',
+        'level': 1,
+        'title': 'Spades; Shovels; Hoes',
+        'section': 'A',
+        'class': 'A01',
+        'subclass': 'A01B'
+    }
+
+
+def test_parse_symbol_edge_cases():
+    """Test parsing edge cases for CPC symbols"""
+    parser = CPCTitleParser()
+    
+    # Empty string
+    assert parser.parse_symbol("") == {
+        'section': None,
+        'subsection': None,
+        'group': None,
+        'subgroup': None
+    }
+    
+    # Invalid format - numeric input
+    assert parser.parse_symbol("123") == {
+        'section': None,
+        'subsection': None,
+        'group': None,
+        'subgroup': None
+    }
+    
+    # Y section (special case)
+    assert parser.parse_symbol("Y02E") == {
+        'section': 'Y',
+        'subsection': 'Y02',
+        'group': 'Y02E',
+        'subgroup': None
+    }
