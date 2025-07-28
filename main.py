@@ -15,10 +15,10 @@ from src.cpc_etl.validator import CPCValidator
 
 # Configure logging
 logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
+
 
 def main():
     """Main execution function"""
@@ -57,8 +57,7 @@ def main():
         # Parse and save title data
         logger.info(f"Processing title list file: {title_list_file}")
         output_path = parser.parse_and_save(
-            str(title_list_file),
-            output="cpc_titles.parquet"
+            str(title_list_file), output="cpc_titles.parquet"
         )
         logger.info(f"Successfully saved parsed data to {output_path}")
 
@@ -69,50 +68,62 @@ def main():
 
         # Load the titles dataframe
         titles_df = pl.read_parquet(output_path)
-        
+
         # Track invalid symbols
         invalid_symbols = []
         total_symbols = len(titles_df)
-        
+
         # Validate each symbol
-        for symbol in titles_df['symbol']:
+        for symbol in titles_df["symbol"]:
             result = validator.validate_symbol(symbol)
-            if not (result.symbol_valid and result.in_symbol_list and result.validity_status == "ACTIVE"):
-                invalid_symbols.append({
-                    'symbol': symbol,
-                    'warnings': result.validation_warnings
-                })
+            if not (
+                result.symbol_valid
+                and result.in_symbol_list
+                and result.validity_status == "ACTIVE"
+            ):
+                invalid_symbols.append(
+                    {"symbol": symbol, "warnings": result.validation_warnings}
+                )
 
         # Report validation results
         if invalid_symbols:
-            logger.warning(f"Found {len(invalid_symbols)} invalid symbols out of {total_symbols} total symbols:")
+            logger.warning(
+                f"Found {len(invalid_symbols)} invalid symbols out of {total_symbols} total symbols:"
+            )
             for invalid in invalid_symbols[:10]:  # Show first 10 invalid symbols
-                logger.warning(f"Symbol: {invalid['symbol']}, Warnings: {invalid['warnings']}")
+                logger.warning(
+                    f"Symbol: {invalid['symbol']}, Warnings: {invalid['warnings']}"
+                )
             if len(invalid_symbols) > 10:
-                logger.warning(f"...and {len(invalid_symbols) - 10} more invalid symbols")
+                logger.warning(
+                    f"...and {len(invalid_symbols) - 10} more invalid symbols"
+                )
         else:
             logger.info(f"All {total_symbols} symbols are valid!")
-            
+
             # Save final output with version info
             output_dir = data_dir / "output"
             output_dir.mkdir(parents=True, exist_ok=True)
-            
+
             # Create output with version date
             version_date = downloader.version
-            output_path = output_dir / f"cpc_schema_{version_date}.parquet"
-            
+            parquet_path = output_dir / f"cpc_schema_{version_date}.parquet"
+            csv_path = output_dir / f"cpc_schema_{version_date}.csv"
+
             # Add version info to the dataframe
-            titles_df = titles_df.with_columns([
-                pl.lit(version_date).alias('cpc_schema_date')
-            ])
-            
+            titles_df = titles_df.with_columns(
+                [pl.lit(version_date).alias("cpc_schema_date")]
+            )
+
             # Save final output
-            titles_df.write_parquet(output_path)
-            logger.info(f"Saved final output to {output_path}")
+            titles_df.write_parquet(parquet_path)
+            titles_df.write_parquet(csv_path)
+            logger.info(f"Saved final output to {parquet_path} and {csv_path}")
 
     except Exception as e:
         logger.error(f"An error occurred: {e}", exc_info=True)
         raise
+
 
 if __name__ == "__main__":
     main()

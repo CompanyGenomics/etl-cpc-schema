@@ -14,13 +14,14 @@ from ..downloader import CPCDownloader
 from ..parser import CPCTitleParser
 from ..validator import CPCValidator
 
+
 class ETLOrchestrator:
     """Orchestrates the ETL pipeline for CPC data processing."""
-    
+
     def __init__(self, data_dir: Path = Path("data")):
         """
         Initialize the ETL orchestrator.
-        
+
         Args:
             data_dir: Base directory for data storage
         """
@@ -28,22 +29,27 @@ class ETLOrchestrator:
         self.raw_dir = data_dir / "raw"
         self.processed_dir = data_dir / "processed"
         self.output_dir = data_dir / "output"
-        
+
         # Create directories if they don't exist
-        for dir_path in [self.data_dir, self.raw_dir, self.processed_dir, self.output_dir]:
+        for dir_path in [
+            self.data_dir,
+            self.raw_dir,
+            self.processed_dir,
+            self.output_dir,
+        ]:
             dir_path.mkdir(parents=True, exist_ok=True)
-            
+
         # Initialize components
         self.downloader = CPCDownloader(data_dir=self.data_dir)
         self.parser = CPCTitleParser(output_dir=str(self.processed_dir))
-        
+
     def run(self, force_download: bool = False) -> Optional[Path]:
         """
         Run the complete ETL pipeline.
-        
+
         Args:
             force_download: If True, force redownload of files even if they exist
-            
+
         Returns:
             Path to the output file if successful, None otherwise
         """
@@ -73,51 +79,61 @@ class ETLOrchestrator:
             # Parse and save title data
             logging.info(f"Processing title list file: {title_list_file}")
             output_path = self.parser.parse_and_save(
-                str(title_list_file),
-                output="cpc_titles.parquet"
+                str(title_list_file), output="cpc_titles.parquet"
             )
             logging.info(f"Successfully saved parsed data to {output_path}")
 
             # Validate CPC symbols
             logging.info("Validating CPC symbols...")
-            validator = CPCValidator(data_dir=self.raw_dir, version=self.downloader.version)
+            validator = CPCValidator(
+                data_dir=self.raw_dir, version=self.downloader.version
+            )
             validator.initialize()
 
             # Load the titles dataframe
             titles_df = pl.read_parquet(output_path)
-            
+
             # Track invalid symbols
             invalid_symbols = []
             total_symbols = len(titles_df)
-            
+
             # Validate each symbol
-            for symbol in titles_df['symbol']:
+            for symbol in titles_df["symbol"]:
                 result = validator.validate_symbol(symbol)
-                if not (result.symbol_valid and result.in_symbol_list and result.validity_status == "ACTIVE"):
-                    invalid_symbols.append({
-                        'symbol': symbol,
-                        'warnings': result.validation_warnings
-                    })
+                if not (
+                    result.symbol_valid
+                    and result.in_symbol_list
+                    and result.validity_status == "ACTIVE"
+                ):
+                    invalid_symbols.append(
+                        {"symbol": symbol, "warnings": result.validation_warnings}
+                    )
 
             # Report validation results
             if invalid_symbols:
-                logging.warning(f"Found {len(invalid_symbols)} invalid symbols out of {total_symbols} total symbols:")
+                logging.warning(
+                    f"Found {len(invalid_symbols)} invalid symbols out of {total_symbols} total symbols:"
+                )
                 for invalid in invalid_symbols[:10]:  # Show first 10 invalid symbols
-                    logging.warning(f"Symbol: {invalid['symbol']}, Warnings: {invalid['warnings']}")
+                    logging.warning(
+                        f"Symbol: {invalid['symbol']}, Warnings: {invalid['warnings']}"
+                    )
                 if len(invalid_symbols) > 10:
-                    logging.warning(f"...and {len(invalid_symbols) - 10} more invalid symbols")
+                    logging.warning(
+                        f"...and {len(invalid_symbols) - 10} more invalid symbols"
+                    )
             else:
                 logging.info(f"All {total_symbols} symbols are valid!")
-                
+
                 # Save final output with version info
                 version_date = self.downloader.version
                 output_path = self.output_dir / f"cpc_schema_{version_date}.parquet"
-                
+
                 # Add version info to the dataframe
-                titles_df = titles_df.with_columns([
-                    pl.lit(version_date).alias('cpc_schema_date')
-                ])
-                
+                titles_df = titles_df.with_columns(
+                    [pl.lit(version_date).alias("cpc_schema_date")]
+                )
+
                 # Save final output
                 titles_df.write_parquet(output_path)
                 logging.info(f"Saved final output to {output_path}")
