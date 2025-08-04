@@ -27,12 +27,23 @@ def main(mytimer: func.TimerRequest) -> None:
 
         # Initialize and run orchestrator
         orchestrator = ETLOrchestrator(data_dir=data_dir)
-        output_path = orchestrator.run()
+        output_files = orchestrator.run()
 
-        if output_path:
-            logging.info(
-                f"Successfully completed ETL pipeline. Output saved to: {output_path}"
-            )
+        if output_files:
+            # Log bulk data files
+            for path in output_files["bulk"]:
+                logging.info(
+                    f"Successfully processed bulk data. Output saved to: {path}"
+                )
+
+            # Log prerelease data files
+            for path in output_files["prereleases"]:
+                logging.info(
+                    f"Successfully processed prerelease data. Output saved to: {path}"
+                )
+
+            if not output_files["bulk"] and not output_files["prereleases"]:
+                logging.warning("No files were processed")
         else:
             logging.error("ETL pipeline failed")
             raise Exception("ETL pipeline failed")

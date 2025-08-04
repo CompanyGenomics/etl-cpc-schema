@@ -9,6 +9,7 @@ from pathlib import Path
 import typer
 from rich.console import Console
 from rich.logging import RichHandler
+from rich.table import Table
 
 from ..pipeline.orchestrator import ETLOrchestrator
 
@@ -37,6 +38,9 @@ def run(
     force: bool = typer.Option(
         False, "--force", "-f", help="Force redownload of files"
     ),
+    skip_prereleases: bool = typer.Option(
+        False, "--skip-prereleases", help="Skip processing prerelease data"
+    ),
 ):
     """Run the complete ETL pipeline"""
     try:
@@ -44,11 +48,26 @@ def run(
 
         # Initialize and run orchestrator
         orchestrator = ETLOrchestrator(data_dir=data_dir)
-        output_path = orchestrator.run(force_download=force)
+        output_files = orchestrator.run(force_download=force)
 
-        if output_path:
+        if output_files:
             console.print(f"[bold green]Successfully completed ETL pipeline![/]")
-            console.print(f"Output saved to: {output_path}")
+
+            # Create a table to display output files
+            table = Table(title="Output Files")
+            table.add_column("Type", style="cyan")
+            table.add_column("Path", style="green")
+
+            # Add bulk data files
+            for path in output_files["bulk"]:
+                table.add_row("Bulk", str(path))
+
+            # Add prerelease data files
+            if not skip_prereleases:
+                for path in output_files["prereleases"]:
+                    table.add_row("Prerelease", str(path))
+
+            console.print(table)
         else:
             console.print("[bold red]ETL pipeline failed[/]")
             raise typer.Exit(code=1)

@@ -3,12 +3,15 @@ import zipfile
 from pathlib import Path
 from typing import Iterator, Dict, Optional, List, Tuple
 import polars as pl
+from datetime import datetime
 
 
 class CPCTitleParser:
     def __init__(self, output_dir: str = "data/processed"):
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
+        self.prerelease_dir = self.output_dir / "prereleases"
+        self.prerelease_dir.mkdir(parents=True, exist_ok=True)
 
     def parse_symbol(self, symbol: str) -> Dict[str, Optional[str]]:
         """Parse a CPC symbol into its components."""
@@ -71,9 +74,18 @@ class CPCTitleParser:
             "subclass": components["group"],
         }
 
-    def process_zip_file(self, zip_path: str) -> pl.DataFrame:
+    def process_zip_file(
+        self, zip_path: str, is_prerelease: bool = False
+    ) -> pl.DataFrame:
         """Process the CPC title list zip file and return DataFrame of titles."""
         title_records = []
+        prerelease_date = None
+
+        # Extract prerelease date from filename if it's a prerelease file
+        if is_prerelease:
+            date_match = re.search(r"(\d{4}-\d{2}-\d{2})", str(zip_path))
+            if date_match:
+                prerelease_date = date_match.group(1)
 
         with zipfile.ZipFile(zip_path) as zf:
             # Process each section file in the zip
@@ -107,14 +119,47 @@ class CPCTitleParser:
             ]
         )
 
+        # Add prerelease information if applicable
+        if is_prerelease and prerelease_date:
+            titles_df = titles_df.with_columns(
+                [
+                    pl.lit(True).alias("is_prerelease"),
+                    pl.lit(prerelease_date).alias("prerelease_date"),
+                ]
+            )
+        else:
+            titles_df = titles_df.with_columns(
+                [
+                    pl.lit(False).alias("is_prerelease"),
+                    pl.lit(None).cast(pl.Utf8).alias("prerelease_date"),
+                ]
+            )
+
         return titles_df
 
-    def parse_and_save(self, zip_path: str, output: str = "cpc_titles.parquet"):
+    def parse_and_save(
+        self,
+        zip_path: str,
+        output: str = "cpc_titles.parquet",
+        is_prerelease: bool = False,
+    ):
         """Process the zip file and save titles as parquet file."""
-        titles_df = self.process_zip_file(zip_path)
+        titles_df = self.process_zip_file(zip_path, is_prerelease=is_prerelease)
+
+        # Determine output path based on whether it's a prerelease
+        if is_prerelease:
+            # Extract date from filename for prerelease output
+            date_match = re.search(r"(\d{4}-\d{2}-\d{2})", str(zip_path))
+            if date_match:
+                prerelease_date = date_match.group(1)
+                output = f"cpc_schema_prerelease_{prerelease_date}.parquet"
+                output_path = self.prerelease_dir / output
+            else:
+                raise ValueError("Could not extract date from prerelease filename")
+        else:
+            output_path = self.output_dir / output
 
         # Save titles
-        output_path = self.output_dir / output
         titles_df.write_parquet(output_path)
         print(f"Saved {len(titles_df)} title records to {output_path}")
 
