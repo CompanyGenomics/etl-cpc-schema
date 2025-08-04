@@ -117,7 +117,7 @@ def main():
 
             # Save final output
             titles_df.write_parquet(parquet_path)
-            titles_df.write_parquet(csv_path)
+            titles_df.write_csv(csv_path)
             logger.info(f"Saved final output to {parquet_path} and {csv_path}")
 
     except Exception as e:
